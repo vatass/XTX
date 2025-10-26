@@ -235,17 +235,33 @@ def main():
 
         # Model & training
         input_dim = X_train.shape[1]
+
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = LSTMRegressor(input_dim=input_dim, hidden_dim=args.hidden_dim, 
-                              num_layers=args.num_layers, dropout=args.dropout).to(device)
+        model = LSTMRegressor(
+            input_dim=input_dim,
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            dropout=args.dropout
+        ).to(device)
+
+        # 🧩 Use all available GPUs
+        if torch.cuda.device_count() > 1:
+            print(f"🔁 Using {torch.cuda.device_count()} GPUs via DataParallel.")
+            model = nn.DataParallel(model)
+
         # model = HFTLSTM(input_dim=input_dim, hidden_dim1=args.hidden_dim1, hidden_dim2=args.hidden_dim2, dropout=args.dropout).to(device)   
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=1e-4)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
         # criterion = nn.MSELoss()
         criterion = nn.SmoothL1Loss()
 
-        wandb.init(project="lob-lstm-cv", name=f"fold_{fold}_{datetime.now().strftime('%Y%m%d_%H%M')}", reinit=True)
+        wandb.init(
+            project="lob-lstm-cv",
+            config=vars(args),  # ✅ logs all argparse arguments
+            reinit=True
+        )
+
         wandb.watch(model)
 
         best_val_loss = float("inf")
@@ -262,10 +278,12 @@ def main():
                   f"Val Loss: {metrics['val_loss']:.4f} | R²: {metrics['val_r2']:.4f} | "
                   f"MSE: {metrics['val_mse']:.6f} | MAE: {metrics['val_mae']:.6f}")
 
+            wandb.log({'val_r2': metrics['val_r2']})
+
             if metrics["val_loss"] < best_val_loss:
                 best_val_loss = metrics["val_loss"]
                 stop_counter = 0
-                torch.save(model.state_dict(), f"best_lstm_fold{fold}.pt")
+                torch.save(model.module.state_dict(), f"best_lstm_fold{fold}.pt")                
             else:
                 stop_counter += 1
                 if stop_counter >= patience:
@@ -277,4 +295,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # Up to 10/25/2025.
+    ### 10/26/2025. The accelerated version.
