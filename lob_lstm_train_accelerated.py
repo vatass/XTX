@@ -165,12 +165,12 @@ from datetime import datetime
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sequence_length", type=int, default=20)
+    parser.add_argument("--sequence_length", type=int, default=70)
     parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
-    parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
-    parser.add_argument("--hidden_dim", type=int, default=32)
+    parser.add_argument("--hidden_dim", type=float, default=32)
+    parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--hidden_dim1", type=int, default=32)
     parser.add_argument("--hidden_dim2", type=int, default=16)
     parser.add_argument("--num_layers", type=int, default=2)
@@ -213,7 +213,7 @@ def main():
     y_all_scaled = global_y_scaler.fit_transform(y_all)
 
     # TimeSeries Cross-validation
-    tscv = TimeSeriesSplit(n_splits=2)
+    tscv = TimeSeriesSplit(n_splits=5)
     fold = 0
 
     for train_idx, val_idx in tscv.split(X_all):
@@ -235,12 +235,23 @@ def main():
 
         # Model & training
         input_dim = X_train.shape[1]
+
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = LSTMRegressor(input_dim=input_dim, hidden_dim=args.hidden_dim, 
-                              num_layers=args.num_layers, dropout=args.dropout).to(device)
+        model = LSTMRegressor(
+            input_dim=input_dim,
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            dropout=args.dropout
+        ).to(device)
+
+        # 🧩 Use all available GPUs
+        if torch.cuda.device_count() > 1:
+            print(f"🔁 Using {torch.cuda.device_count()} GPUs via DataParallel.")
+            model = nn.DataParallel(model)
+
         # model = HFTLSTM(input_dim=input_dim, hidden_dim1=args.hidden_dim1, hidden_dim2=args.hidden_dim2, dropout=args.dropout).to(device)   
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=1e-4)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
         # criterion = nn.MSELoss()
         criterion = nn.SmoothL1Loss()
@@ -265,7 +276,7 @@ def main():
             if metrics["val_loss"] < best_val_loss:
                 best_val_loss = metrics["val_loss"]
                 stop_counter = 0
-                torch.save(model.state_dict(), f"best_lstm_fold{fold}.pt")
+                torch.save(model.module.state_dict(), f"best_lstm_fold{fold}.pt")                
             else:
                 stop_counter += 1
                 if stop_counter >= patience:
