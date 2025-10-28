@@ -1,3 +1,7 @@
+'''
+Best LSTM: Daily Plant 55, 1024 batch size, 10 epochs, 1e-3 learning rate, 1e-4 weight decay, 0.3 dropout, 20 sequence length, 32 hidden dim, 2 num layers
+'''
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -86,9 +90,57 @@ class LSTMRegressor(nn.Module):
         out_norm = self.layer_norm(out_last)
 
         # Predict final target
+        out_final = self.fc(out_norm).squeeze(-1)
+
+        return out_final
+
+
+import torch
+import torch.nn as nn
+
+class LSTMRegressorMLP(nn.Module):
+    def __init__(self, input_dim, hidden_dim=64, num_layers=2, dropout=0.3):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+
+        # 🧠 LSTM with dropout between layers (only active if num_layers > 1)
+        self.lstm = nn.LSTM(
+            input_dim,
+            hidden_dim,
+            num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0.0,
+        )
+
+        # ⚖️ Layer normalization to stabilize hidden activations
+        self.layer_norm = nn.LayerNorm(hidden_dim)
+
+        # 🧩 MLP head for output projection
+        self.fc = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+
+    def forward(self, x):
+        # out: (batch_size, seq_len, hidden_dim)
+        out, _ = self.lstm(x)
+
+        # Use last timestep output
+        out_last = out[:, -1, :]
+
+        # Normalize before feeding to linear layer
+        out_norm = self.layer_norm(out_last)
+
+        # Predict final target
         out_final = self.fc(out_norm).squeeze()
 
         return out_final
+
+
+
 
 # 🧪 Dataset
 class LOBSeqDataset(Dataset):
@@ -166,7 +218,7 @@ from datetime import datetime
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sequence_length", type=int, default=20)
-    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -176,11 +228,15 @@ def main():
     parser.add_argument("--num_layers", type=int, default=2)
     parser.add_argument("--data_path", type=str, default="train.csv.gz")
     parser.add_argument("--dropout", type=float, default=0.3)
+    parser.add_argument("--top_levels", type=int, default=4)
     args = parser.parse_args()
+
+    # the name is the hidden dim, sequence length, and dropout, weight decay, and learning rate, batch size, num layers
+    name = f"hidden_dim_{args.hidden_dim}_seq_len_{args.sequence_length}_dropout_{args.dropout}_weight_decay_{args.weight_decay}_lr_{args.learning_rate}_batch_size_{args.batch_size}_num_layers_{args.num_layers}"
 
     # --- Load raw data ---
     df = pd.read_csv(args.data_path)
-    top_levels = range(4)
+    top_levels = range(args.top_levels)
 
     raw_cols = [f"{side}{attr}_{lvl}" for side in ["ask", "bid"] for attr in ["Rate", "Size", "Nc"] for lvl in top_levels]
     rate_cols = [col for col in raw_cols if "Rate" in col]
@@ -217,7 +273,13 @@ def main():
     fold = 0
 
     for train_idx, val_idx in tscv.split(X_all):
+
         fold += 1
+        
+
+        if fold != 2:
+            continue  # Skip all folds except the second one
+        
         X_train_raw, X_val_raw = X_all[train_idx], X_all[val_idx]
         y_train_raw, y_val_raw = y_all[train_idx], y_all[val_idx]
 
@@ -249,11 +311,9 @@ def main():
             print(f"🔁 Using {torch.cuda.device_count()} GPUs via DataParallel.")
             model = nn.DataParallel(model)
 
-        # model = HFTLSTM(input_dim=input_dim, hidden_dim1=args.hidden_dim1, hidden_dim2=args.hidden_dim2, dropout=args.dropout).to(device)   
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=1e-4)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
-        # criterion = nn.MSELoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)        # criterion = nn.MSELoss()
         criterion = nn.SmoothL1Loss()
 
         wandb.init(
@@ -264,7 +324,7 @@ def main():
 
         wandb.watch(model)
 
-        best_val_loss = float("inf")
+        best_val_r2 = float("-inf")
         stop_counter = 0
         patience = 10
 
@@ -280,19 +340,18 @@ def main():
 
             wandb.log({'val_r2': metrics['val_r2']})
 
-            if metrics["val_loss"] < best_val_loss:
-                best_val_loss = metrics["val_loss"]
+            if metrics["val_r2"] > best_val_r2:
+                best_val_r2 = metrics["val_r2"]
                 stop_counter = 0
-                torch.save(model.module.state_dict(), f"best_lstm_fold{fold}.pt")                
+                torch.save(model.module.state_dict(), f"./models/best_lstm_linear_fold{fold}_name_{name}.pt")                
             else:
                 stop_counter += 1
                 if stop_counter >= patience:
                     print("⏹️ Early stopping.")
                     break
 
-        print(f"✅ Finished Fold {fold}. Best model saved as 'best_lstm_fold{fold}.pt'")
+        print(f"✅ Finished Fold {fold}. Best model saved as 'best_lstm_linear_fold{fold}_name_{name}.pt'")
         wandb.finish()
 
 if __name__ == "__main__":
     main()
-    ### 10/26/2025. The accelerated version.
