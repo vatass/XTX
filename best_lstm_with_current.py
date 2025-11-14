@@ -1,5 +1,5 @@
 '''
-Best LSTM: Daily Plant 55, 1024 batch size, 10 epochs, 1e-3 learning rate, 1e-4 weight decay, 0.3 dropout, 20 sequence length, 32 hidden dim, 2 num layers
+7-fold cross validation of LOB Regression 
 '''
 
 import torch
@@ -21,6 +21,22 @@ import torch
 import torch.nn as nn
 import random
 import pickle
+
+from sklearn.model_selection import TimeSeriesSplit
+import argparse
+
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.preprocessing import StandardScaler
+from torch.utils.data import DataLoader
+import torch
+import torch.nn as nn
+import argparse
+import wandb
+from datetime import datetime
+
+
 torch.manual_seed(42)
 np.random.seed(42)
 random.seed(42)
@@ -61,7 +77,6 @@ class LSTMRegressor(nn.Module):
         out_final = self.fc(out_norm).squeeze(-1)
 
         return out_final
-
 
 class LOBSeqDataset(Dataset):
     def __init__(self, X, y, sequence_length=1):
@@ -120,19 +135,6 @@ def evaluate(model, dataloader, criterion, device):
         "val_mae": mean_absolute_error(targets, preds), 
     }
 
-from sklearn.model_selection import TimeSeriesSplit
-import argparse
-
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.preprocessing import StandardScaler
-from torch.utils.data import DataLoader
-import torch
-import torch.nn as nn
-import argparse
-import wandb
-from datetime import datetime
 
 def main():
     parser = argparse.ArgumentParser()
@@ -195,48 +197,40 @@ def main():
 
         fold += 1
         
-        if fold != 7:
-            continue
+        # if fold != 7:
+        #     continue
                 
         X_train_raw, X_val_raw = X_all[train_idx], X_all[val_idx]
         y_train_raw, y_val_raw = y_all[train_idx], y_all[val_idx]
 
         # Store the test data to csv in order to test the inference script. 
-        pd.DataFrame(X_val_raw, columns=feature_cols).to_csv(
-            f'./cvmodelcurrent/test_data_fold_{fold}.csv', index=False
-        )
+        # pd.DataFrame(X_val_raw, columns=feature_cols).to_csv(
+        #     f'./cvmodelcurrent/test_data_fold_{fold}.csv', index=False
+        # )
 
-        pd.DataFrame(y_val_raw, columns=["y"]).to_csv(
-            f'./cvmodelcurrent/test_targets_fold_{fold}.csv', index=False
-        )
+        # pd.DataFrame(y_val_raw, columns=["y"]).to_csv(
+        #     f'./cvmodelcurrent/test_targets_fold_{fold}.csv', index=False
+        # )
 
         # Save the raw test slice to verify the production ready pipeline:  
-        # Save RAW validation data (what the interviewer will have)
         raw_val_df = df_raw.iloc[val_idx].copy()
 
-        # If you want to exclude y because interviewer won’t have y:
-        if "y" in raw_val_df.columns:
-            raw_val_df_noy = raw_val_df.drop(columns=["y"])
-        else:
-            raw_val_df_noy = raw_val_df
+        # if "y" in raw_val_df.columns:
+        #     raw_val_df_noy = raw_val_df.drop(columns=["y"])
+        # else:
+        #     raw_val_df_noy = raw_val_df
 
-        raw_val_df_noy.to_csv(
-            f"./cvmodelcurrent/raw_fold7_test.csv",
-            index=False
-        )
+        # raw_val_df_noy.to_csv(
+        #     f"./cvmodelcurrent/raw_fold7_test.csv",
+        #     index=False
+        # )
 
-        # Save y separately for yourself
-        y_test_raw = df_raw.iloc[val_idx]["y"].values.reshape(-1)
-        pd.DataFrame({"y": y_test_raw}).to_csv(
-            f"./cvmodelcurrent/raw_fold7_y.csv",
-            index=False
-        )
-
-        # store the val indices 
-        np.save("./cvmodelcurrent/fold7_indices.npy", val_idx)
-
-        sys.exit(0)
-
+        # # Save y separately for yourself
+        # y_test_raw = df_raw.iloc[val_idx]["y"].values.reshape(-1)
+        # pd.DataFrame({"y": y_test_raw}).to_csv(
+        #     f"./cvmodelcurrent/raw_fold7_y.csv",
+        #     index=False
+        # )
         
         x_scaler = StandardScaler()
         X_train = x_scaler.fit_transform(X_train_raw)
@@ -254,9 +248,7 @@ def main():
         X_val = x_scaler.transform(X_val_raw)
         y_val = y_scaler.transform(y_val_raw).squeeze()   
 
-        sys.exit(0)
-        
-        
+            
         # Dataset & loader
         train_ds = LOBSeqDataset(X_train, y_train, sequence_length=args.sequence_length)
         val_ds = LOBSeqDataset(X_val, y_val, sequence_length=args.sequence_length)
