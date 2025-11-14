@@ -1,7 +1,7 @@
 # LSTM Limit Order Book Forecasting – Inference Instructions
 
 This repository provides the production inference script for evaluating the
-trained LSTM model on **any raw Limit Order Book dataset**.
+trained LSTM model on **raw Limit Order Book dataset**.
 
 Requirements:
 
