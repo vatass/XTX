@@ -3,7 +3,7 @@
 This repository provides the production inference script for evaluating the
 trained LSTM model on **any raw Limit Order Book dataset**.
 
-The reviewer only needs:
+Requirements:
 
 - `raw.csv` — raw limit order book data **without target y**
 - `best_lstm.pt` — trained LSTM model weights
@@ -50,13 +50,11 @@ prediction_scaled,row_index
 ...
 ```
 
-The reviewer can compare these predictions with their own hidden target values.
 
 ---
 
 ## Notes
 
-- No target column is required or used.
 - The script applies **identical feature engineering** as during training.
 - Sequence length is fixed to 40 by default.
 - Predictions are **in scaled space**, matching the model's training behavior.
